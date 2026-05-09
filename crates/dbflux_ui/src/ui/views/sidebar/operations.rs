@@ -1,6 +1,5 @@
 use super::*;
 use crate::platform;
-use crate::ui::AsyncUpdateResultExt;
 use crate::ui::components::toast::PendingToast;
 use dbflux_app::hook_executor::CompositeExecutor;
 use dbflux_app::{ExternalDriverDiagnostic, ExternalDriverStage};
@@ -498,17 +497,12 @@ async fn drain_task_output(
                 }
             }
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 app_state.update(cx, |state, cx| {
                     state.append_task_details(task_id, &chunk);
                     cx.emit(AppStateChanged);
                 });
-            }) {
-                log::warn!(
-                    "Failed to append detached hook output to task details: {:?}",
-                    error
-                );
-            }
+            });
         }
 
         if disconnected {
@@ -529,25 +523,23 @@ fn start_detached_hook_task(
     let description = handle.description.clone();
     let ready_signal = handle.ready_signal.clone();
 
-    let (task_id, cancel_token) = cx
-        .update(|cx| {
-            app_state.update(cx, |state, cx| {
-                let task = state.start_task_for_profile(
-                    TaskKind::Hook { phase },
-                    format!(
-                        "Hook Process: {} — {} — {}",
-                        phase.label(),
-                        profile_name,
-                        description
-                    ),
-                    Some(profile_id),
-                );
-                state.register_detached_hook_task(profile_id, task.0);
-                cx.emit(AppStateChanged);
-                task
-            })
+    let (task_id, cancel_token) = cx.update(|cx| {
+        app_state.update(cx, |state, cx| {
+            let task = state.start_task_for_profile(
+                TaskKind::Hook { phase },
+                format!(
+                    "Hook Process: {} — {} — {}",
+                    phase.label(),
+                    profile_name,
+                    description
+                ),
+                Some(profile_id),
+            );
+            state.register_detached_hook_task(profile_id, task.0);
+            cx.emit(AppStateChanged);
+            task
         })
-        .map_err(|_| ())?;
+    });
 
     let (ready_sender, ready_receiver) = if ready_signal.is_some() {
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -590,7 +582,7 @@ fn start_detached_hook_task(
             })
             .await;
 
-        if let Err(error) = cx.update(|cx| {
+        cx.update(|cx| {
             app_state_for_completion.update(cx, |state, cx| {
                 state.unregister_detached_hook_task(profile_id, task_id);
 
@@ -644,12 +636,7 @@ fn start_detached_hook_task(
 
                 cx.emit(AppStateChanged);
             });
-        }) {
-            log::warn!(
-                "Failed to apply detached hook completion to sidebar state: {:?}",
-                error
-            );
-        }
+        });
     })
     .detach();
 
@@ -776,7 +763,7 @@ async fn run_hook_phase(
 
         let command_display = hook.display_command();
 
-        let (task_id, hook_cancel_token) = match cx.update(|cx| {
+        let (task_id, hook_cancel_token) = cx.update(|cx| {
             app_state.update(cx, |state, cx| {
                 let task = state.start_hook_task_for_profile(
                     phase,
@@ -787,26 +774,18 @@ async fn run_hook_phase(
                 cx.emit(AppStateChanged);
                 task
             })
-        }) {
-            Ok(value) => value,
-            Err(_) => return HookPhaseState::Cancelled,
-        };
+        });
 
         if phase == HookPhase::PreConnect && hook.is_detached() && hook.ready_signal.is_none() {
             let error = "Detached pre-connect hooks must set a ready signal before DBFlux can continue connecting"
                 .to_string();
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 app_state.update(cx, |state, cx| {
                     state.fail_task(task_id, error.clone());
                     cx.emit(AppStateChanged);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply detached hook registration failure state: {:?}",
-                    error
-                );
-            }
+            });
 
             return HookPhaseState::Aborted { error };
         }
@@ -909,17 +888,12 @@ async fn run_hook_phase(
         }
 
         if let Some(error) = detached_task_registration_failed {
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 app_state.update(cx, |state, cx| {
                     state.fail_task(task_id, error.clone());
                     cx.emit(AppStateChanged);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply detached hook registration failure state: {:?}",
-                    update_error
-                );
-            }
+            });
 
             return HookPhaseState::Aborted { error };
         }
@@ -989,7 +963,7 @@ async fn run_hook_phase(
             hook_task_details(&hook, phase, &command_display, &hook_result)
         };
 
-        if let Err(error) = cx.update(|cx| {
+        cx.update(|cx| {
             app_state.update(cx, |state, cx| {
                 if let Some(message) = &failure_message {
                     state.fail_task_with_details(task_id, message.clone(), details.clone());
@@ -999,12 +973,7 @@ async fn run_hook_phase(
 
                 cx.emit(AppStateChanged);
             });
-        }) {
-            log::warn!(
-                "Failed to apply hook phase task completion state: {:?}",
-                error
-            );
-        }
+        });
 
         // Emit hook completion/failure audit event.
         let hook_end_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
@@ -1599,7 +1568,7 @@ impl Sidebar {
                 Err(error) => DatabaseRefreshExecutionOutcome::Failed { error, held_state },
             };
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 sidebar.update(cx, |sidebar, cx| {
                     sidebar.clear_tracked_operation_task(task_id);
                     Self::apply_database_refresh_outcome(
@@ -1614,12 +1583,7 @@ impl Sidebar {
                         cx,
                     );
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply lazy database refresh outcome: {:?}",
-                    update_error
-                );
-            }
+            });
         });
 
         self.track_operation_task(task_id, operation_task);
@@ -1713,7 +1677,7 @@ impl Sidebar {
                 })
                 .await;
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 sidebar.update(cx, |sidebar, cx| {
                     sidebar.clear_tracked_operation_task(task_id);
                     Self::apply_database_refresh_outcome(
@@ -1728,12 +1692,7 @@ impl Sidebar {
                         cx,
                     );
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply per-database refresh outcome: {:?}",
-                    update_error
-                );
-            }
+            });
         });
 
         self.track_operation_task(task_id, operation_task);
@@ -1780,14 +1739,14 @@ impl Sidebar {
                     .get(&profile_id)
                     .map(|connected| connected.connection.clone())
             }) {
-                Ok(Some(connection)) => connection,
-                Ok(None) => {
+                Some(connection) => connection,
+                None => {
                     let outcome = DatabaseRefreshExecutionOutcome::Failed {
                         error: "Profile not connected".to_string(),
                         held_state,
                     };
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         sidebar.update(cx, |sidebar, cx| {
                             sidebar.clear_tracked_operation_task(task_id);
                             Self::apply_database_refresh_outcome(
@@ -1802,19 +1761,7 @@ impl Sidebar {
                                 cx,
                             );
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply missing connection refresh outcome: {:?}",
-                            update_error
-                        );
-                    }
-                    return;
-                }
-                Err(update_error) => {
-                    log::warn!(
-                        "Failed to read current connection for refresh: {:?}",
-                        update_error
-                    );
+                    });
                     return;
                 }
             };
@@ -1837,7 +1784,7 @@ impl Sidebar {
                 },
             };
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 sidebar.update(cx, |sidebar, cx| {
                     sidebar.clear_tracked_operation_task(task_id);
                     Self::apply_database_refresh_outcome(
@@ -1852,12 +1799,7 @@ impl Sidebar {
                         cx,
                     );
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply current database refresh outcome: {:?}",
-                    update_error
-                );
-            }
+            });
         });
 
         self.track_operation_task(task_id, operation_task);
@@ -2305,7 +2247,7 @@ impl Sidebar {
         cx.spawn(async move |_this, cx| {
             let result = task.await;
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 if cancel_token.is_cancelled() {
                     log::info!("Fetch database schema task was cancelled");
                     app_state.update(cx, |state, cx| {
@@ -2365,12 +2307,7 @@ impl Sidebar {
 
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply schema fetch result to sidebar state: {:?}",
-                    error
-                );
-            }
+            });
         })
         .detach();
     }
@@ -2462,7 +2399,7 @@ impl Sidebar {
         cx.spawn(async move |_this, cx| {
             let result = task.await;
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 if cancel_token.is_cancelled() {
                     log::info!("Database connection task was cancelled, discarding result");
                     app_state.update(cx, |state, cx| {
@@ -2514,12 +2451,7 @@ impl Sidebar {
                     sidebar.pending_toast = toast;
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply per-database connection result to sidebar state: {:?}",
-                    error
-                );
-            }
+            });
         })
         .detach();
     }
@@ -2634,7 +2566,7 @@ impl Sidebar {
                     hook_warnings.extend(warnings);
                 }
                 HookPhaseState::Aborted { error } => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error.clone());
@@ -2649,16 +2581,11 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pre-connect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             cx.emit(AppStateChanged);
@@ -2690,12 +2617,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pre-connect cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
@@ -2706,7 +2628,7 @@ impl Sidebar {
             let connecting_database = hook_context.database.clone();
             let connect_start_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 app_state.update(cx, |state, _cx| {
                     if let Err(e) = state.audit_service().record(
                         dbflux_core::observability::EventRecord::new(
@@ -2728,12 +2650,7 @@ impl Sidebar {
                         log::warn!("Failed to record connection_connecting audit event: {}", e);
                     }
                 });
-            }) {
-                log::warn!(
-                    "Failed to emit connection_connecting audit event: {:?}",
-                    update_error
-                );
-            }
+            });
 
             let result = cx
                 .background_executor()
@@ -2741,7 +2658,7 @@ impl Sidebar {
                 .await;
 
             if cancel_token.is_cancelled() {
-                if let Err(update_error) = cx.update(|cx| {
+                cx.update(|cx| {
                     log::info!("Connection task was cancelled, discarding result");
 
                     app_state.update(cx, |state, cx| {
@@ -2752,12 +2669,7 @@ impl Sidebar {
                     sidebar.update(cx, |sidebar, cx| {
                         sidebar.refresh_tree(cx);
                     });
-                }) {
-                    log::warn!(
-                        "Failed to apply cancelled connection task state: {:?}",
-                        update_error
-                    );
-                }
+                });
                 return;
             }
 
@@ -2769,7 +2681,7 @@ impl Sidebar {
                     let profile_name_for_audit = profile_name.clone();
                     let profile_id_for_audit = profile_id;
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             // Emit failure audit event.
                             let now_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
@@ -2818,12 +2730,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply connection failure state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             };
@@ -2844,7 +2751,7 @@ impl Sidebar {
                     hook_warnings.extend(warnings);
                 }
                 HookPhaseState::Aborted { error } => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error.clone());
@@ -2859,16 +2766,11 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply post-connect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             cx.emit(AppStateChanged);
@@ -2900,12 +2802,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply post-connect cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
@@ -2913,7 +2810,7 @@ impl Sidebar {
             let connected_profile_name = connected.profile.name.clone();
             let connected_driver_id = connected.profile.driver_id.clone();
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 for warning in &hook_warnings {
                     log::warn!("{}", warning);
                 }
@@ -2969,12 +2866,7 @@ impl Sidebar {
                     });
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply successful connection state to sidebar: {:?}",
-                    update_error
-                );
-            }
+            });
         })
         .detach();
     }
@@ -3074,7 +2966,8 @@ impl Sidebar {
                     && current_stage
                         .as_ref()
                         .is_none_or(|(active, _)| active != &description)
-                    && let Err(error) = cx.update(|cx| {
+                {
+                    cx.update(|cx| {
                         let stage_state = state.clone();
 
                         app_state_for_stage_tasks.update(cx, |app_state, cx| {
@@ -3096,10 +2989,7 @@ impl Sidebar {
 
                             cx.emit(AppStateChanged);
                         });
-                    })
-                {
-                    log::warn!("Failed to update pipeline stage subtask: {:?}", error);
-                    break;
+                    });
                 }
 
                 if matches!(
@@ -3110,7 +3000,7 @@ impl Sidebar {
                 ) {
                     let terminal_state = state.clone();
 
-                    if let Err(error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state_for_stage_tasks.update(cx, |app_state, cx| {
                             if let Some((_, stage_task_id)) = current_stage.take() {
                                 match &terminal_state {
@@ -3136,25 +3026,21 @@ impl Sidebar {
 
                             cx.emit(AppStateChanged);
                         });
-                    }) {
-                        log::warn!("Failed to finalize pipeline stage subtask: {:?}", error);
-                    }
+                    });
 
                     break;
                 }
             }
 
-            if current_stage.is_some()
-                && let Err(error) = cx.update(|cx| {
+            if current_stage.is_some() {
+                cx.update(|cx| {
                     app_state_for_stage_tasks.update(cx, |state, cx| {
                         if let Some((_, stage_task_id)) = current_stage.take() {
                             state.complete_task(stage_task_id);
                             cx.emit(AppStateChanged);
                         }
                     });
-                })
-            {
-                log::warn!("Failed to cleanup pipeline stage subtask: {:?}", error);
+                });
             }
         })
         .detach();
@@ -3188,7 +3074,7 @@ impl Sidebar {
                         error: error.clone(),
                     });
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error.clone());
@@ -3203,18 +3089,13 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pipeline pre-connect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
                     let _ = state_tx.send(dbflux_core::PipelineState::Cancelled);
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             cx.emit(crate::app::AppStateChanged);
@@ -3246,12 +3127,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pipeline pre-connect hook cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
@@ -3306,7 +3182,7 @@ impl Sidebar {
                         }
                     });
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error_msg.clone());
@@ -3321,9 +3197,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!("Failed to apply pipeline failure state: {:?}", update_error);
-                    }
+                    });
                     return;
                 }
             };
@@ -3413,7 +3287,7 @@ impl Sidebar {
                         }
                     });
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error.clone());
@@ -3428,12 +3302,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pipeline driver connect failure: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             };
@@ -3459,7 +3328,7 @@ impl Sidebar {
                         error: error.clone(),
                     });
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             state.fail_task(task_id, error.clone());
@@ -3474,18 +3343,13 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pipeline post-connect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
                     let _ = state_tx.send(dbflux_core::PipelineState::Cancelled);
 
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.cancel_detached_hook_tasks(profile_id);
                             cx.emit(crate::app::AppStateChanged);
@@ -3517,12 +3381,7 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pipeline post-connect hook cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
@@ -3556,7 +3415,7 @@ impl Sidebar {
                 }
             });
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 for warning in &hook_warnings {
                     log::warn!("{}", warning);
                 }
@@ -3587,12 +3446,7 @@ impl Sidebar {
                     });
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply pipeline connection result: {:?}",
-                    update_error
-                );
-            }
+            });
         })
         .detach();
     }
@@ -3654,7 +3508,7 @@ impl Sidebar {
                     hook_warnings.extend(warnings);
                 }
                 HookPhaseState::Aborted { error } => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.fail_task(task_id, error.clone());
                             cx.emit(AppStateChanged);
@@ -3667,16 +3521,11 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pre-disconnect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         if !cancel_token.is_cancelled() {
                             app_state.update(cx, |state, cx| {
                                 state.fail_task(task_id, "Disconnect hook cancelled");
@@ -3697,12 +3546,7 @@ impl Sidebar {
                         sidebar.update(cx, |sidebar, cx| {
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply pre-disconnect cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
@@ -3729,19 +3573,14 @@ impl Sidebar {
                 }
             });
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 app_state.update(cx, |state, cx| {
                     state.disconnect(profile_id);
                     state.cancel_detached_hook_tasks(profile_id);
                     cx.emit(AppStateChanged);
                     cx.notify();
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply disconnect transition to app state: {:?}",
-                    update_error
-                );
-            }
+            });
 
             match run_hook_phase(
                 app_state.clone(),
@@ -3759,7 +3598,7 @@ impl Sidebar {
                     hook_warnings.extend(warnings);
                 }
                 HookPhaseState::Aborted { error } => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         app_state.update(cx, |state, cx| {
                             state.fail_task(task_id, error.clone());
                             cx.emit(AppStateChanged);
@@ -3776,16 +3615,11 @@ impl Sidebar {
                             });
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply post-disconnect hook abort state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
                 HookPhaseState::Cancelled => {
-                    if let Err(update_error) = cx.update(|cx| {
+                    cx.update(|cx| {
                         if !cancel_token.is_cancelled() {
                             app_state.update(cx, |state, cx| {
                                 state.fail_task(task_id, "Post-disconnect hook cancelled");
@@ -3807,17 +3641,12 @@ impl Sidebar {
                         sidebar.update(cx, |sidebar, cx| {
                             sidebar.refresh_tree(cx);
                         });
-                    }) {
-                        log::warn!(
-                            "Failed to apply post-disconnect cancellation state: {:?}",
-                            update_error
-                        );
-                    }
+                    });
                     return;
                 }
             }
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 for warning in &hook_warnings {
                     log::warn!("{}", warning);
                 }
@@ -3845,12 +3674,7 @@ impl Sidebar {
                     });
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!(
-                    "Failed to apply successful disconnect state to sidebar: {:?}",
-                    update_error
-                );
-            }
+            });
         })
         .detach();
 
@@ -4033,7 +3857,7 @@ impl Sidebar {
                 None => return,
             };
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 let path = app_state.update(cx, |state, _cx| {
                     let dir = state.scripts_directory_mut()?;
                     let imported = dir.import(&source, parent.as_deref()).ok()?;
@@ -4047,12 +3871,7 @@ impl Sidebar {
                         cx.emit(SidebarEvent::OpenScript { path });
                     });
                 }
-            }) {
-                log::warn!(
-                    "Failed to apply imported script state to sidebar: {:?}",
-                    error
-                );
-            }
+            });
         })
         .detach();
     }
@@ -4626,7 +4445,7 @@ impl Sidebar {
                 }
             };
 
-            if let Err(update_error) = cx.update(|cx| {
+            cx.update(|cx| {
                 sidebar.update(cx, |sidebar, cx| {
                     sidebar.clear_tracked_operation_task(task_id);
                     sidebar.loading_items.remove(&item_id);
@@ -4738,9 +4557,7 @@ impl Sidebar {
 
                     sidebar.refresh_tree(cx);
                 });
-            }) {
-                log::warn!("Failed to apply object refresh result: {:?}", update_error);
-            }
+            });
         });
 
         self.track_operation_task(task_id, operation_task);
@@ -4993,9 +4810,9 @@ impl Sidebar {
                         )
                     })
                 }) {
-                    Ok(Ok(plan)) => plan,
-                    Ok(Err(error)) => {
-                        if let Err(update_error) = cx.update(|cx| {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        cx.update(|cx| {
                             sidebar.update(cx, |sidebar, _cx| {
                                 sidebar.clear_tracked_operation_task(task_id);
                             });
@@ -5012,27 +4829,7 @@ impl Sidebar {
                                 });
                                 sidebar.refresh_tree(cx);
                             });
-                        }) {
-                            log::warn!(
-                                "Failed to apply database drop release error: {:?}",
-                                update_error
-                            );
-                        }
-                        return;
-                    }
-                    Err(update_error) => {
-                        log::warn!(
-                            "Failed to prepare database drop release: {:?}",
-                            update_error
-                        );
-
-                        cx.update(|cx| {
-                            sidebar.update(cx, |sidebar, _cx| {
-                                sidebar.clear_tracked_operation_task(task_id);
-                            });
-                        })
-                        .log_if_dropped();
-
+                        });
                         return;
                     }
                 }
@@ -5115,7 +4912,7 @@ impl Sidebar {
                 })
                 .await;
 
-            if let Err(update_error) = cx.update(|cx| match drop_result {
+            cx.update(|cx| match drop_result {
                 DropExecutionOutcome::Dropped {
                     database_release_applied,
                 } => {
@@ -5232,9 +5029,7 @@ impl Sidebar {
                         sidebar.refresh_tree(cx);
                     });
                 }
-            }) {
-                log::warn!("Failed to apply schema drop result: {:?}", update_error);
-            }
+            });
         });
 
         self.track_operation_task(task_id, operation_task);

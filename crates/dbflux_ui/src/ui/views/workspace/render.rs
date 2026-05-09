@@ -22,7 +22,7 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(command_id) = self.pending_command.take() {
             self.handle_command(command_id, window, cx);
-            self.focus_handle.focus(window);
+            self.focus_handle.focus(window, cx);
         }
 
         // Handle SQL generated from sidebar (e.g., SELECT * FROM table)
@@ -40,7 +40,7 @@ impl Render for Workspace {
 
         if self.needs_focus_restore {
             self.needs_focus_restore = false;
-            self.focus_handle.focus(window);
+            self.focus_handle.focus(window, cx);
         }
 
         // Open the login modal on behalf of a settings-window auth-profile login.

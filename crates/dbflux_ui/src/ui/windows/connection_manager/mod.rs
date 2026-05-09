@@ -529,7 +529,7 @@ impl ConnectionManagerWindow {
         ];
 
         let focus_handle = cx.focus_handle();
-        window.focus(&focus_handle);
+        window.focus(&focus_handle, cx);
 
         Self {
             app_state: app_state.clone(),
@@ -851,7 +851,7 @@ impl ConnectionManagerWindow {
         self.view = View::EditForm;
         self.edit_state = EditState::Navigating;
         self.form_focus = FormFocus::Name;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -1178,7 +1178,7 @@ impl ConnectionManagerWindow {
     }
 
     fn back_to_driver_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.view = View::DriverSelect;
         self.selected_driver_id = None;
         self.selected_driver = None;
@@ -2112,9 +2112,8 @@ impl ConnectionManagerWindow {
                         .read(cx)
                         .auth_provider_by_id(&profile.provider_id)
                 }) {
-                    Ok(Some(provider)) => provider,
-                    Ok(None) => continue,
-                    Err(_) => continue,
+                    Some(provider) => provider,
+                    None => continue,
                 };
 
                 let status = provider
@@ -2122,17 +2121,12 @@ impl ConnectionManagerWindow {
                     .await
                     .unwrap_or(AuthSessionState::LoginRequired);
 
-                if cx
-                    .update(|cx| {
-                        this.update(cx, |this, cx| {
-                            this.auth_profile_session_states.insert(profile.id, status);
-                            this.populate_auth_profile_dropdown(cx);
-                        });
-                    })
-                    .is_err()
-                {
-                    return;
-                }
+                cx.update(|cx| {
+                    this.update(cx, |this, cx| {
+                        this.auth_profile_session_states.insert(profile.id, status);
+                        this.populate_auth_profile_dropdown(cx);
+                    });
+                });
             }
         })
         .detach();
@@ -2275,22 +2269,17 @@ impl ConnectionManagerWindow {
         cx.spawn(async move |_entity, cx| {
             let result = provider.login(&profile, Box::new(|_| {})).await;
 
-            if cx
-                .update(|cx| {
-                    this.update(cx, |this, cx| {
-                        this.auth_profile_login_in_progress = false;
-                        this.auth_profile_action_message = Some(match result {
-                            Ok(_) => "Auth-provider login completed.".to_string(),
-                            Err(error) => format!("Auth-provider login failed: {}", error),
-                        });
-
-                        this.refresh_auth_profile_sessions(cx);
+            cx.update(|cx| {
+                this.update(cx, |this, cx| {
+                    this.auth_profile_login_in_progress = false;
+                    this.auth_profile_action_message = Some(match result {
+                        Ok(_) => "Auth-provider login completed.".to_string(),
+                        Err(error) => format!("Auth-provider login failed: {}", error),
                     });
-                })
-                .is_err()
-            {
-                // Window may have closed before async completion.
-            }
+
+                    this.refresh_auth_profile_sessions(cx);
+                });
+            });
         })
         .detach();
     }
@@ -2673,7 +2662,7 @@ impl ConnectionManagerWindow {
         cx.spawn(async move |_this, cx| {
             let result = task.await;
 
-            if let Err(error) = cx.update(|cx| {
+            cx.update(|cx| {
                 this.update(cx, |this, cx| {
                     match result {
                         Ok(()) => {
@@ -2687,9 +2676,7 @@ impl ConnectionManagerWindow {
                     }
                     cx.notify();
                 });
-            }) {
-                log::warn!("Failed to apply SSH test result to UI state: {:?}", error);
-            }
+            });
         })
         .detach();
     }
@@ -2710,18 +2697,13 @@ impl ConnectionManagerWindow {
         cx.spawn(async move |_this, cx| {
             let path = task.await;
 
-            if let Some(path) = path
-                && let Err(error) = cx.update(|cx| {
+            if let Some(path) = path {
+                cx.update(|cx| {
                     this.update(cx, |this, cx| {
                         this.pending_ssh_key_path = Some(path.to_string_lossy().to_string());
                         cx.notify();
                     });
-                })
-            {
-                log::warn!(
-                    "Failed to apply selected SSH key path to UI state: {:?}",
-                    error
-                );
+                });
             }
         })
         .detach();
@@ -2755,18 +2737,13 @@ impl ConnectionManagerWindow {
         cx.spawn(async move |_this, cx| {
             let path = task.await;
 
-            if let Some(path) = path
-                && let Err(error) = cx.update(|cx| {
+            if let Some(path) = path {
+                cx.update(|cx| {
                     this.update(cx, |this, cx| {
                         this.pending_file_path = Some(path.to_string_lossy().to_string());
                         cx.notify();
                     });
-                })
-            {
-                log::warn!(
-                    "Failed to apply selected file path to UI state: {:?}",
-                    error
-                );
+                });
             }
         })
         .detach();

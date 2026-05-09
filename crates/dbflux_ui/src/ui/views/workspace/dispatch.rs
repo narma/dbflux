@@ -253,7 +253,7 @@ impl CommandDispatcher for Workspace {
             Command::Cancel => {
                 if self.command_palette.read(cx).is_visible() {
                     self.command_palette.update(cx, |p, cx| p.hide(cx));
-                    self.focus_handle.focus(window);
+                    self.focus_handle.focus(window, cx);
                     return true;
                 }
 
@@ -288,7 +288,7 @@ impl CommandDispatcher for Workspace {
                 }
 
                 // Always focus workspace to blur any input and enable keyboard navigation
-                self.focus_handle.focus(window);
+                self.focus_handle.focus(window, cx);
                 true
             }
 
