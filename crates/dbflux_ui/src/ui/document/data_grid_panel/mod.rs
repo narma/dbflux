@@ -8,7 +8,6 @@ mod utils;
 use super::result_view::ResultViewMode;
 use super::task_runner::DocumentTaskRunner;
 use crate::app::AppStateEntity;
-use crate::ui::AsyncUpdateResultExt;
 use crate::ui::components::data_table::{
     ContextMenuAction, DataTable, DataTableEvent, DataTableState, SortState as TableSortState,
     TableModel,
@@ -504,8 +503,7 @@ impl DataGridPanel {
                         cx.notify();
                     });
                 }
-            })
-            .log_if_dropped();
+            });
         })
         .detach();
     }
@@ -914,7 +912,7 @@ impl DataGridPanel {
             loop {
                 cx.background_executor().timer(duration).await;
 
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     let Some(entity) = this.upgrade() else {
                         return;
                     };

@@ -814,7 +814,7 @@ async fn run_hook_phase(
         let hook_start_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
         let hook_command_for_audit = hook.display_command();
         let phase_label = phase.label();
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             if let Err(error) = app_state.read(cx).audit_service().record(
                 dbflux_core::observability::EventRecord::new(
                     hook_start_ms,
@@ -1009,7 +1009,7 @@ async fn run_hook_phase(
         } else {
             format!("Hook '{}' ({}) completed", command_display, phase.label())
         };
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let audit_service = app_state.read(cx).audit_service().clone();
             let mut event = dbflux_core::observability::EventRecord::new(
                 hook_end_ms,
@@ -3158,7 +3158,7 @@ impl Sidebar {
                     // Emit pipeline connection failure audit event.
                     let pipeline_fail_now_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
                     let pipeline_fail_driver_id = driver.display_name().to_string();
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         let audit_service = app_state.read(cx).audit_service().clone();
                         let mut event = dbflux_core::observability::EventRecord::new(
                             pipeline_fail_now_ms,
@@ -3263,7 +3263,7 @@ impl Sidebar {
                     // Emit driver connect failure audit event.
                     let driver_fail_now_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
                     let driver_fail_driver_id = driver_name_for_audit.clone();
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         let audit_service = app_state.read(cx).audit_service().clone();
                         let mut event = dbflux_core::observability::EventRecord::new(
                             driver_fail_now_ms,
@@ -3393,7 +3393,7 @@ impl Sidebar {
 
             // Emit pipeline connection success audit event.
             let connect_success_now_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let audit_service = app_state.read(cx).audit_service().clone();
                 let mut event = dbflux_core::observability::EventRecord::new(
                     connect_success_now_ms,
@@ -3554,7 +3554,7 @@ impl Sidebar {
             // Emit disconnect audit event before actual disconnect.
             let disconnect_driver_id = profile.driver_id.clone();
             let disconnect_now_ms = dbflux_core::chrono::Utc::now().timestamp_millis();
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let audit_service = app_state.read(cx).audit_service().clone();
                 let mut event = dbflux_core::observability::EventRecord::new(
                     disconnect_now_ms,

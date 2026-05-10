@@ -4,7 +4,6 @@ use super::{
     PendingDocumentPreview, PendingModalOpen, PendingToast, SqlGenerateKind, TableContextMenu,
 };
 use crate::keymap::{Command, ContextId};
-use crate::ui::AsyncUpdateResultExt;
 use crate::ui::components::data_table::{ContextMenuAction, FilterOperator};
 use crate::ui::components::data_table::{HEADER_HEIGHT, ROW_HEIGHT};
 use crate::ui::components::toast::ToastExt;
@@ -913,8 +912,7 @@ impl DataGridPanel {
                     panel.pending_toast = Some(PendingToast { message, is_error });
                     cx.notify();
                 });
-            })
-            .log_if_dropped();
+            });
         })
         .detach();
     }
@@ -2637,8 +2635,7 @@ impl DataGridPanel {
                         }
                         cx.notify();
                     });
-                })
-                .log_if_dropped();
+                });
             })
             .detach();
 
@@ -2740,8 +2737,7 @@ impl DataGridPanel {
                     }
                     cx.notify();
                 });
-            })
-            .log_if_dropped();
+            });
         })
         .detach();
     }
